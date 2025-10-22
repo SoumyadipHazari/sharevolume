@@ -1,0 +1,126 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>SEC Data for Loading...</title><script src="https://cdn.tailwindcss.com"></script><style>/* Add any custom styles here if necessary */</style></head><body class="bg-gray-100 font-sans antialiased flex items-center justify-center min-h-screen p-4"><div class="bg-white rounded-lg shadow-xl p-6 md:p-8 lg:p-10 max-w-2xl w-full"><h1 class="text-3xl md:text-4xl font-bold text-center text-gray-800 mb-6" id="share-entity-name">Loading Entity Name...</h1><div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8"><div class="bg-blue-50 p-5 rounded-lg border border-blue-200"><h2 class="text-xl font-semibold text-blue-800 mb-3">Maximum Shares Outstanding</h2><p class="text-gray-700 text-lg">Value: <span class="font-bold text-blue-700" id="share-max-value">...</span></p><p class="text-gray-700 text-lg">Fiscal Year: <span class="font-bold text-blue-700" id="share-max-fy">...</span></p></div><div class="bg-green-50 p-5 rounded-lg border border-green-200"><h2 class="text-xl font-semibold text-green-800 mb-3">Minimum Shares Outstanding</h2><p class="text-gray-700 text-lg">Value: <span class="font-bold text-green-700" id="share-min-value">...</span></p><p class="text-gray-700 text-lg">Fiscal Year: <span class="font-bold text-green-700" id="share-min-fy">...</span></p></div></div><div class="mt-8 pt-6 border-t border-gray-200 text-sm text-gray-600"><h3 class="font-semibold text-gray-800 mb-2">Instructions:</h3><p>To view data for a different CIK, append <code>?CIK=</code> followed by a 10-digit CIK to the URL (e.g., <code>index.html?CIK=0001018724</code>).</p><p class="mt-4">Attachment 'uid.txt' content (committed as-is):</p><pre class="bg-gray-50 p-3 rounded border border-gray-200 mt-2 whitespace-pre-wrap text-xs md:text-sm">This is the content of uid.txt for AES Corporation.</pre></div></div><script>
+        const DEFAULT_CIK = '0000874761'; // AES Corporation
+        const SEC_API_BASE = 'https://data.sec.gov/api/xbrl/companyconcept/';
+        const CONCEPT_PATH = '/dei/EntityCommonStockSharesOutstanding.json';
+        const PROXY_URL_BASE = 'https://api.allorigins.win/get?url='; // Client-side proxy for CORS
+
+        async function fetchData(cik) {
+            const url = `${SEC_API_BASE}CIK${cik}${CONCEPT_PATH}`;
+            let fetchUrl = url;
+
+            // Use a proxy for CIKs other than the default, or always if needed for CORS.
+            // For production, a reliable server-side proxy is recommended for SEC API access
+            // due to User-Agent requirements and rate limiting.
+            // allorigins.win is used here for client-side demo purposes.
+            if (window.location.search.includes('CIK=') || cik !== DEFAULT_CIK) {
+                 fetchUrl = `${PROXY_URL_BASE}${encodeURIComponent(url)}`;
+            }
+            
+            try {
+                const response = await fetch(fetchUrl, {
+                    // User-Agent cannot be set directly from client-side JavaScript due to browser security.
+                    // If a server-side proxy is used, it should set a descriptive User-Agent.
+                    // allorigins.win will use its own User-Agent.
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                let data = await response.json();
+
+                // If using allorigins.win, the actual response data is inside 'contents'
+                if (fetchUrl.startsWith(PROXY_URL_BASE)) {
+                    data = JSON.parse(data.contents);
+                }
+                
+                return data;
+            } catch (error) {
+                console.error("Failed to fetch data:", error);
+                document.getElementById('share-entity-name').textContent = 'Error loading data.';
+                document.getElementById('share-max-value').textContent = 'N/A';
+                document.getElementById('share-max-fy').textContent = 'N/A';
+                document.getElementById('share-min-value').textContent = 'N/A';
+                document.getElementById('share-min-fy').textContent = 'N/A';
+                return null;
+            }
+        }
+
+        function processData(rawData) {
+            if (!rawData || !rawData.units || !rawData.units.shares) {
+                return null;
+            }
+
+            const entityName = rawData.entityName;
+            
+            const filteredShares = rawData.units.shares.filter(entry => 
+                entry.fy > "2020" && typeof entry.val === 'number'
+            );
+
+            if (filteredShares.length === 0) {
+                return { entityName: entityName, max: null, min: null };
+            }
+
+            let maxValEntry = filteredShares[0];
+            let minValEntry = filteredShares[0];
+
+            for (const entry of filteredShares) {
+                if (entry.val > maxValEntry.val) {
+                    maxValEntry = entry;
+                }
+                if (entry.val < minValEntry.val) {
+                    minValEntry = entry;
+                }
+            }
+
+            return {
+                entityName: entityName,
+                max: { val: maxValEntry.val, fy: maxValEntry.fy },
+                min: { val: minValEntry.val, fy: minValEntry.fy }
+            };
+        }
+
+        function updateUI(processedData) {
+            if (!processedData) {
+                document.title = 'SEC Data: Error';
+                document.getElementById('share-entity-name').textContent = 'Error: Data could not be processed.';
+                return;
+            }
+
+            const entityName = processedData.entityName || 'Unknown Entity';
+            document.title = `SEC Data for ${entityName}`;
+            document.getElementById('share-entity-name').textContent = entityName;
+
+            if (processedData.max) {
+                document.getElementById('share-max-value').textContent = processedData.max.val.toLocaleString();
+                document.getElementById('share-max-fy').textContent = processedData.max.fy;
+            } else {
+                document.getElementById('share-max-value').textContent = 'N/A';
+                document.getElementById('share-max-fy').textContent = 'N/A';
+            }
+
+            if (processedData.min) {
+                document.getElementById('share-min-value').textContent = processedData.min.val.toLocaleString();
+                document.getElementById('share-min-fy').textContent = processedData.min.fy;
+            } else {
+                document.getElementById('share-min-value').textContent = 'N/A';
+                document.getElementById('share-min-fy').textContent = 'N/A';
+            }
+        }
+
+        async function init() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const cikParam = urlParams.get('CIK');
+            const targetCik = cikParam || DEFAULT_CIK;
+
+            const rawData = await fetchData(targetCik);
+            if (rawData) {
+                const processedData = processData(rawData);
+                updateUI(processedData);
+            } else {
+                updateUI(null); // Indicate an error occurred
+            }
+        }
+
+        init();
+    </script></body></html>
